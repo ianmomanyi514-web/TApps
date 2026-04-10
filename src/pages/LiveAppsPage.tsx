@@ -4,6 +4,7 @@ import { fetchApprovedApps } from '@/lib/api';
 import AppIcon from '@/components/features/AppIcon';
 import StarRating from '@/components/features/StarRating';
 import DBFeaturedBanner from '@/components/features/DBFeaturedBanner';
+import PromotionBanner from '@/components/features/PromotionBanner';
 import SectionHeader from '@/components/features/SectionHeader';
 import TopBar from '@/components/layout/TopBar';
 import { cn } from '@/lib/utils';
@@ -132,6 +133,9 @@ const LiveAppsPage = ({ onAuthRequired, onTabChange }: LiveAppsPageProps) => {
       <div className="mt-4">
         {/* Featured banner */}
         <DBFeaturedBanner />
+
+        {/* Promotion Banner */}
+        <PromotionBanner />
 
         {/* 🔥 Trending This Week */}
         <HorizontalSection

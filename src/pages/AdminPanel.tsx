@@ -7,7 +7,7 @@ import { DBApp } from '@/types/database';
 import AppIcon from '@/components/features/AppIcon';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import { CheckCircle, XCircle, Users, Package, Star, Download, TrendingUp, ChevronLeft, Eye, Shield, UserCheck, BookmarkCheck, ChevronUp, ChevronDown, Layers, BarChart2, BadgeCheck, Flag } from 'lucide-react';
+import { CheckCircle, XCircle, Users, Package, Star, Download, TrendingUp, ChevronLeft, Eye, Shield, UserCheck, BookmarkCheck, ChevronUp, ChevronDown, Layers, BarChart2, BadgeCheck, Flag, FileDown, Megaphone, X } from 'lucide-react';
 import DBAppDetailModal from '@/components/features/DBAppDetailModal';
 import { supabase } from '@/lib/supabase';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
@@ -21,7 +21,7 @@ interface StoreStats {
   totalInstalls: number;
 }
 
-type AdminTab = 'overview' | 'apps' | 'users' | 'featured' | 'analytics' | 'reports';
+type AdminTab = 'overview' | 'apps' | 'users' | 'featured' | 'analytics' | 'reports' | 'banner';
 type AppFilter = 'all' | 'pending' | 'approved' | 'rejected';
 
 const StatCard = ({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: number | string; color: string }) => (
@@ -68,9 +68,15 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
   const [reports, setReports] = useState<Record<string, unknown>[]>([]);
   const [reportsLoading, setReportsLoading] = useState(false);
   const [appSearch, setAppSearch] = useState('');
+  const [bannerSettings, setBannerSettings] = useState<{enabled:boolean;text:string;color:string}>({enabled:false,text:'',color:'#10b981'});
+  const [bannerSaving, setBannerSaving] = useState(false);
 
   useEffect(() => {
     getStoreStats().then(setStats).catch(() => {});
+    // Load banner settings
+    supabase.from('app_settings').select('value').eq('key','promotion_banner').single()
+      .then(({data}) => { if (data?.value) setBannerSettings(data.value as {enabled:boolean;text:string;color:string}); })
+      .catch(()=>{});
   }, []);
 
   useEffect(() => {
@@ -136,6 +142,33 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
       setFeaturedApps(prev => prev.filter(a => a.id !== app.id));
       toast.success(`${app.name} removed from featured`);
     } catch { toast.error('Failed to unfeature app'); }
+  };
+
+  // Review export
+  const handleExportReviews = async () => {
+    const { data } = await supabase.from('reviews')
+      .select('*, user_profiles(username, email), apps(name)')
+      .order('created_at', { ascending: false });
+    if (!data) return;
+    const rows = (data as Record<string, unknown>[]).map(r => {
+      const u = r.user_profiles as Record<string,string>|null;
+      const a = r.apps as Record<string,string>|null;
+      return [a?.name||'', u?.username||'', u?.email||'', r.rating, `"${(r.comment as string||'').replace(/"/g,'""')}"`, new Date(r.created_at as string).toLocaleDateString()].join(',');
+    });
+    const csv = ['App,User,Email,Rating,Comment,Date', ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'tapps-reviews.csv'; a.click();
+    URL.revokeObjectURL(url);
+    toast.success('Reviews exported!');
+  };
+
+  const handleSaveBanner = async () => {
+    setBannerSaving(true);
+    await supabase.from('app_settings').upsert({ key: 'promotion_banner', value: bannerSettings, updated_at: new Date().toISOString() });
+    setBannerSaving(false);
+    toast.success('Banner saved!');
   };
 
   const loadApps = useCallback(async (filter: AppFilter, page: number, reset = false) => {
@@ -248,7 +281,105 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
           <button onClick={onBack} className="mt-4 px-6 py-2.5 bg-primary text-primary-foreground rounded-full font-semibold text-sm">
             Go Back
           </button>
-        </div>
+          {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
+        {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
       </div>
     );
   }
@@ -264,22 +395,267 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
           <div>
             <p className="text-white/60 text-xs font-medium">T Apps</p>
             <p className="text-white font-bold text-xl">Admin Panel</p>
+            {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
           </div>
+        )}
+
+      </div>
           <div className="ml-auto bg-red-500/20 border border-red-500/40 text-red-300 text-xs font-semibold px-3 py-1 rounded-full flex items-center gap-1">
             <Shield size={11} />Admin
+            {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
           </div>
-        </div>
+        )}
+
+      </div>
+          {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
+        {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
       </div>
 
       {/* Tabs */}
       <div className="flex bg-white border-b border-border/50 sticky top-0 z-10">
-        {([['overview', 'Overview', TrendingUp], ['apps', 'Apps', Package], ['featured', 'Featured', Layers], ['analytics', 'Analytics', BarChart2], ['users', 'Users', Users], ['reports', 'Reports', Flag]] as const).map(([id, label, Icon]) => (
+        {([['overview', 'Overview', TrendingUp], ['apps', 'Apps', Package], ['featured', 'Featured', Layers], ['analytics', 'Analytics', BarChart2], ['users', 'Users', Users], ['reports', 'Reports', Flag], ['banner', 'Banner', Megaphone]] as const).map(([id, label, Icon]) => (
           <button key={id} onClick={() => setActiveTab(id as AdminTab)}
             className={cn('flex-1 flex items-center justify-center gap-1.5 py-3.5 text-xs font-semibold border-b-2 transition-colors',
               activeTab === id ? 'border-primary text-primary' : 'border-transparent text-muted-foreground')}>
             <Icon size={14} />{label}
           </button>
         ))}
+        {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
       </div>
 
       <div className="px-4 pt-4">
@@ -296,7 +672,56 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                   <StatCard icon={<Users size={20} className="text-purple-600" />} label="Total Users" value={stats.totalUsers} color="bg-purple-100" />
                   <StatCard icon={<Star size={20} className="text-orange-600" />} label="Reviews" value={stats.totalReviews} color="bg-orange-100" />
                   <StatCard icon={<Download size={20} className="text-teal-600" />} label="Total Installs" value={stats.totalInstalls} color="bg-teal-100" />
+                  {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
                 </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                 {stats.pendingApps > 0 && (
                   <button onClick={() => { setActiveTab('apps'); setAppFilter('pending'); }}
                     className="w-full mt-2 py-3 bg-yellow-500 text-white rounded-2xl font-semibold text-sm hover:bg-yellow-600 transition-colors flex items-center justify-center gap-2">
@@ -308,9 +733,107 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
             ) : (
               <div className="grid grid-cols-2 gap-3">
                 {[1,2,3,4,5,6].map(i => <div key={i} className="h-20 bg-secondary rounded-2xl animate-pulse" />)}
+                {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
               </div>
-            )}
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
           </div>
+        )}
+
+      </div>
+            )}
+            {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
         )}
 
         {/* Apps Tab */}
@@ -329,7 +852,56 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                   <XCircle size={14} className="text-muted-foreground" />
                 </button>
               )}
+              {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
             </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
             <div className="flex gap-2 mb-4 overflow-x-auto scrollbar-hide pb-1">
               {(['pending', 'approved', 'rejected', 'all'] as const).map(f => (
                 <button key={f} onClick={() => setAppFilter(f)}
@@ -343,17 +915,164 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                   {f}
                 </button>
               ))}
+              {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
             </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
 
             {loading ? (
               <div className="space-y-3">
                 {[1,2,3,4].map(i => <div key={i} className="h-24 bg-secondary rounded-2xl animate-pulse" />)}
+                {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
               </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
             ) : apps.length === 0 ? (
               <div className="text-center py-16">
                 <Package size={40} className="text-muted-foreground/30 mx-auto mb-3" />
                 <p className="font-semibold text-foreground">No {appFilter === 'all' ? '' : appFilter} apps</p>
+                {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
               </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
             ) : (
               <div className="space-y-3">
                 {apps.filter(app =>
@@ -376,14 +1095,161 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                               app.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700')}>
                               {app.status}
                             </span>
-                          </div>
+                            {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                           <p className="text-xs text-muted-foreground mt-0.5">By {app.developer_name} · {app.category}</p>
                           <p className="text-xs text-muted-foreground/70 mt-0.5 line-clamp-2">{app.description}</p>
                           <p className="text-xs text-muted-foreground/50 mt-1">
                             Submitted {new Date(app.created_at).toLocaleDateString()}
                           </p>
-                        </div>
-                      </div>
+                          {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
+                        {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                       <div className="flex gap-2 mt-3">
                         <button onClick={() => setSelectedApp(app)}
                           className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl border border-border text-xs font-semibold text-foreground hover:bg-accent transition-colors">
@@ -410,9 +1276,156 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                             <BookmarkCheck size={13} />{app.featured ? 'Featured' : 'Feature'}
                           </button>
                         )}
-                      </div>
-                    </div>
+                        {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
                   </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
+                      {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
+                    {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                 ))}
                 {!appSearch && hasMoreApps && (
                   <button onClick={loadMore} disabled={loadingMore}
@@ -420,9 +1433,107 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                     {loadingMore ? 'Loading...' : 'Load More'}
                   </button>
                 )}
+                {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
               </div>
-            )}
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
           </div>
+        )}
+
+      </div>
+            )}
+            {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
         )}
 
         {/* Users Tab */}
@@ -431,7 +1542,56 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
             {loading ? (
               <div className="space-y-2">
                 {[1,2,3,4,5].map(i => <div key={i} className="h-20 bg-secondary rounded-2xl animate-pulse" />)}
+                {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
               </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
             ) : (
               <div className="space-y-2">
                 {users.map((u: Record<string, unknown>) => {
@@ -445,15 +1605,162 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                         <div className={cn('w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 text-white text-sm font-bold',
                           ROLE_AVATAR_GRADIENT[uRole] || ROLE_AVATAR_GRADIENT.user)}>
                           {(u.username as string)?.[0]?.toUpperCase() || '?'}
-                        </div>
+                          {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                         <div className="flex-1 min-w-0">
                           <p className="font-semibold text-sm text-foreground line-clamp-1">{u.username as string || 'Unknown'}</p>
                           <p className="text-xs text-muted-foreground">{u.email as string}</p>
-                        </div>
+                          {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                         <span className={cn('text-xs px-2.5 py-1 rounded-full font-semibold flex-shrink-0', ROLE_COLORS[uRole] || ROLE_COLORS.user)}>
                           {uRole}
                         </span>
-                      </div>
+                        {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                       {/* Role assignment buttons */}
                       {!isCurrentUser && (
                         <div className="space-y-2">
@@ -470,7 +1777,56 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                                 {isChanging && uRole !== role ? '...' : role.charAt(0).toUpperCase() + role.slice(1)}
                               </button>
                             ))}
-                          </div>
+                            {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                           {uRole === 'developer' && (
                             <button
                               onClick={async () => {
@@ -488,17 +1844,213 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                               {(u.verified as boolean) ? 'Verified Developer ✓' : 'Grant Verified Badge'}
                             </button>
                           )}
-                        </div>
+                          {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                       )}
                       {isCurrentUser && (
                         <p className="text-xs text-muted-foreground text-center py-1">Your account</p>
                       )}
-                    </div>
+                      {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                   );
                 })}
+                {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
               </div>
-            )}
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
           </div>
+        )}
+
+      </div>
+            )}
+            {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
         )}
 
         {/* Analytics Tab */}
@@ -524,7 +2076,56 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
+                    {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
                   </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                 )}
                 {analyticsData.categoryData.length > 0 && (
                   <div className="bg-card border border-border rounded-2xl p-4">
@@ -541,7 +2142,56 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
+                    {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
                   </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                 )}
                 {analyticsData.statusData.length > 0 && (
                   <div className="bg-card border border-border rounded-2xl p-4">
@@ -557,11 +2207,109 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                         <Legend iconType="circle" iconSize={10} wrapperStyle={{ fontSize: 12 }} />
                       </PieChart>
                     </ResponsiveContainer>
+                    {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
                   </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                 )}
               </>
             )}
+            {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
           </div>
+        )}
+
+      </div>
         )}
 
         {/* Reports Tab */}
@@ -569,8 +2317,112 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
           <div>
             <div className="flex items-center justify-between mb-4">
               <p className="font-bold text-base text-foreground">App Reports</p>
-              <span className="text-xs bg-red-100 text-red-700 px-2.5 py-1 rounded-full font-semibold">{reports.filter(r => r.status === 'pending').length} pending</span>
+              <div className="flex items-center gap-2">
+                <button onClick={handleExportReviews}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition-colors">
+                  <FileDown size={12} />Export Reviews
+                </button>
+                <span className="text-xs bg-red-100 text-red-700 px-2.5 py-1 rounded-full font-semibold">{reports.filter(r => r.status === 'pending').length} pending</span>
+                {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
             </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
+              {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
             {reportsLoading ? (
               <div className="space-y-3">{[1,2,3].map(i => <div key={i} className="h-24 bg-secondary rounded-2xl animate-pulse" />)}</div>
             ) : reports.length === 0 ? (
@@ -578,7 +2430,56 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                 <Flag size={36} className="text-muted-foreground/20 mx-auto mb-3" />
                 <p className="font-semibold text-foreground">No reports yet</p>
                 <p className="text-sm text-muted-foreground mt-1">App reports from users will appear here</p>
+                {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
               </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
             ) : (
               <div className="space-y-3">
                 {reports.map((report) => {
@@ -591,7 +2492,56 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                         <div className={cn('w-9 h-9 rounded-2xl flex items-center justify-center flex-shrink-0',
                           isPending ? 'bg-red-100' : 'bg-secondary')}>
                           <Flag size={16} className={isPending ? 'text-red-600' : 'text-muted-foreground'} />
-                        </div>
+                          {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap mb-0.5">
                             <p className="font-semibold text-sm text-foreground">{rApp?.name as string || 'Unknown App'}</p>
@@ -599,17 +2549,213 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                               isPending ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700')}>
                               {report.status as string}
                             </span>
-                          </div>
+                            {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                           <p className="text-xs text-muted-foreground">By {rUser?.username as string || 'Unknown'}</p>
                           <div className="mt-2 bg-secondary/60 rounded-xl px-3 py-2">
                             <p className="text-xs font-semibold text-foreground">{report.reason as string}</p>
                             {report.details && <p className="text-xs text-muted-foreground mt-0.5">{report.details as string}</p>}
-                          </div>
+                            {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                           <p className="text-xs text-muted-foreground/50 mt-1.5">
                             {new Date(report.created_at as string).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                           </p>
-                        </div>
-                      </div>
+                          {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
+                        {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                       {isPending && (
                         <div className="flex gap-2 mt-3">
                           <button
@@ -630,14 +2776,210 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                             className="flex-1 py-2 rounded-xl border border-border text-xs font-semibold hover:bg-accent transition-colors">
                             Dismiss
                           </button>
-                        </div>
+                          {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                       )}
-                    </div>
+                      {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                   );
                 })}
+                {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
               </div>
-            )}
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
           </div>
+        )}
+
+      </div>
+            )}
+            {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
         )}
 
         {/* Featured Slider Tab */}
@@ -647,26 +2989,271 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
               <div>
                 <p className="font-bold text-base text-foreground">Featured App Slider</p>
                 <p className="text-xs text-muted-foreground mt-0.5">Drag to reorder. Featured apps appear in the homepage banner.</p>
-              </div>
-              {reordering && <span className="text-xs text-primary font-medium">Saving...</span>}
+                {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
             </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
+              {reordering && <span className="text-xs text-primary font-medium">Saving...</span>}
+              {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
 
             {featuredLoading ? (
               <div className="space-y-3">
                 {[1,2,3].map(i => <div key={i} className="h-20 bg-secondary rounded-2xl animate-pulse" />)}
+                {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
               </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
             ) : featuredApps.length === 0 ? (
               <div className="text-center py-16 px-6">
                 <div className="w-16 h-16 rounded-3xl bg-secondary flex items-center justify-center mx-auto mb-4">
                   <Layers size={28} className="text-muted-foreground" />
+                  {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
                 </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                 <p className="font-semibold text-foreground">No featured apps yet</p>
                 <p className="text-sm text-muted-foreground mt-1 mb-4">Go to the Apps tab, approve an app and click "Feature" to add it here.</p>
                 <button onClick={() => { setActiveTab('apps'); setAppFilter('approved'); }}
                   className="px-5 py-2.5 bg-primary text-primary-foreground rounded-full text-sm font-semibold hover:bg-primary/90">
                   Go to Apps
                 </button>
+                {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
               </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
             ) : (
               <div className="space-y-3">
                 {featuredApps.map((app, idx) => (
@@ -678,7 +3265,56 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                       <div className="w-24 flex-shrink-0 flex items-center justify-center"
                         style={{ background: `linear-gradient(135deg, ${app.icon_bg}cc, ${app.icon_bg}55)` }}>
                         <span className="text-white/60 font-black text-2xl">{app.icon}</span>
-                      </div>
+                        {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                     )}
                     <div className="flex-1 p-3 min-w-0">
                       <div className="flex items-start gap-2">
@@ -686,14 +3322,161 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                           <div className="flex items-center gap-2">
                             <span className="text-xs font-black text-muted-foreground/40">#{idx + 1}</span>
                             <p className="font-bold text-sm text-foreground line-clamp-1">{app.name}</p>
-                          </div>
+                            {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                           <p className="text-xs text-muted-foreground">{app.developer_name} · {app.category}</p>
                           <div className="flex items-center gap-1 mt-1">
                             <Star size={11} className="fill-yellow-400 text-yellow-400" />
                             <span className="text-xs font-semibold">{Number(app.avg_rating ?? 0).toFixed(1)}</span>
                             <span className="text-xs text-muted-foreground">· {app.downloads_count} installs</span>
-                          </div>
-                        </div>
+                            {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
+                          {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                         {/* Order controls */}
                         <div className="flex flex-col gap-1 flex-shrink-0">
                           <button onClick={() => moveFeatured(idx, 'up')} disabled={idx === 0 || reordering}
@@ -704,24 +3487,416 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                             className="w-7 h-7 flex items-center justify-center rounded-lg border border-border hover:bg-accent disabled:opacity-30 transition-colors">
                             <ChevronDown size={13} />
                           </button>
-                        </div>
+                          {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                         <button onClick={() => handleUnfeature(app)}
                           className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-destructive/10 border border-border flex-shrink-0 transition-colors">
                           <XCircle size={13} className="text-muted-foreground hover:text-destructive" />
                         </button>
-                      </div>
-                    </div>
+                        {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
                   </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
+                      {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
+                    {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
                 ))}
 
                 <div className="bg-secondary/50 rounded-2xl p-4 text-center">
                   <p className="text-xs text-muted-foreground">Use ↑↓ to reorder · ✕ to remove from slider</p>
                   <p className="text-xs text-muted-foreground mt-1">Changes apply to the homepage banner immediately</p>
+                  {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
                 </div>
               </div>
-            )}
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
           </div>
         )}
+
+      </div>
+                {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
+            )}
+            {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
+        )}
+        {/* Banner Tab */}
+        {activeTab === 'banner' && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-bold text-base text-foreground">Promotion Banner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Shows a dismissable banner at the top of the For You page</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+              {/* Preview */}
+              {bannerSettings.text && (
+                <div className="rounded-2xl px-4 py-3 text-white text-sm font-semibold flex items-center justify-between gap-2" style={{ backgroundColor: bannerSettings.color }}>
+                  <div className="flex items-center gap-2">
+                    <Megaphone size={15} />
+                    <span>{bannerSettings.text}</span>
+                  </div>
+                  <X size={14} />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Enable Banner</p>
+                <button onClick={() => setBannerSettings(p => ({...p, enabled: !p.enabled}))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${bannerSettings.enabled ? 'bg-primary' : 'bg-border'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${bannerSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Banner Text</label>
+                <input value={bannerSettings.text} onChange={e => setBannerSettings(p => ({...p, text: e.target.value}))}
+                  placeholder="🎉 New apps added! Explore what's new..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/50 text-sm outline-none focus:border-primary transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Banner Color</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['#10b981','#3b82f6','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#ec4899','#1e293b'].map(c => (
+                    <button key={c} onClick={() => setBannerSettings(p => ({...p, color: c}))}
+                      className={`w-8 h-8 rounded-xl border-2 transition-transform hover:scale-110 ${bannerSettings.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleSaveBanner} disabled={bannerSaving}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
+                {bannerSaving ? 'Saving...' : 'Save Banner Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
       </div>
 
       {selectedApp && (

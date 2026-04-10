@@ -9,6 +9,7 @@ import AuthPage from './AuthPage';
 import AdminPanel from './AdminPanel';
 import TopChartsPage from './TopChartsPage';
 import CategoriesPage from './CategoriesPage';
+import CommunityPage from './CommunityPage';
 import { useAuth } from '@/hooks/useAuth';
 
 const Index = () => {
@@ -30,6 +31,8 @@ const Index = () => {
         return <TopChartsPage onAuthRequired={handleAuthRequired} />;
       case 'categories':
         return <CategoriesPage onAuthRequired={handleAuthRequired} />;
+      case 'community':
+        return <CommunityPage onAuthRequired={handleAuthRequired} />;
       case 'search':
         return <LiveSearchPage onAuthRequired={handleAuthRequired} />;
       case 'admin':

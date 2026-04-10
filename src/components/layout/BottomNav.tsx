@@ -1,4 +1,4 @@
-import { Gamepad2, Grid3X3, Search, User, Code2, Shield, BarChart2, Layers } from 'lucide-react';
+import { Gamepad2, Grid3X3, Search, User, Code2, Shield, BarChart2, Layers, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 
@@ -21,10 +21,9 @@ const BottomNav = ({ activeTab, onTabChange }: BottomNavProps) => {
         { id: 'admin', label: 'Admin', icon: Shield },
       ]
     : [
-        { id: 'games', label: 'Games', icon: Gamepad2 },
         { id: 'apps', label: 'Apps', icon: Grid3X3 },
         { id: 'topcharts', label: 'Charts', icon: BarChart2 },
-        { id: 'categories', label: 'Categories', icon: Layers },
+        { id: 'community', label: 'Community', icon: Users },
         { id: 'search', label: 'Search', icon: Search },
         {
           id: 'profile',

@@ -17,6 +17,8 @@ Build a native Android APK from this React/Vite project using Capacitor.
 npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/status-bar @capacitor/splash-screen @capacitor/keyboard
 ```
 
+> **Note:** `capacitor.config.ts` is already configured in this project.
+
 ### Step 2 — Build the web app
 
 ```bash
@@ -65,7 +67,37 @@ After build: `android/app/build/outputs/apk/release/app-release.apk`
 
 ---
 
-## 🌐 Custom Domain Setup
+## ▲ Vercel Deployment
+
+This project includes a pre-configured `vercel.json` for instant Vercel deployment.
+
+### Deploy via Vercel CLI
+
+```bash
+npm i -g vercel
+vercel
+```
+
+Follow prompts: select your project, use default settings.
+
+### Deploy via GitHub
+
+1. Push project to a GitHub repository
+2. Go to [vercel.com](https://vercel.com) → Import Project
+3. Select your GitHub repo
+4. Vercel auto-detects Vite — click **Deploy**
+5. Add Environment Variables in Vercel Dashboard:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+
+### Custom Domain on Vercel
+
+1. In Vercel project → Settings → Domains
+2. Add your domain (e.g., `tapps.yourdomain.com`)
+3. Add the CNAME record in your DNS provider
+4. SSL certificate is auto-provisioned
+
+---
 
 ### Option A: OnSpace Built-in Domain (Recommended)
 

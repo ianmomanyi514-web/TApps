@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Bookmark, Download, Settings, LogOut, User, Code2, Star, ChevronRight, ExternalLink, Clock, ArrowUpCircle, Share2, Check, X, Bell, BellOff } from 'lucide-react';
+import { Bookmark, Download, Settings, LogOut, User, Code2, Star, ChevronRight, ExternalLink, Clock, ArrowUpCircle, Share2, Check, X, Bell, BellOff, Globe } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { fetchUserWishlist, removeFromWishlist } from '@/lib/api';
 import { DBApp } from '@/types/database';
@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { authService } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { useNavigate } from 'react-router-dom';
+import { useI18n, Lang } from '@/lib/i18n';
 
 interface InstalledApp {
   app_id: string;
@@ -49,6 +50,7 @@ const NOTIF_PREF_OPTIONS: { key: keyof NotifPrefs; label: string; desc: string }
 const UserProfile = ({ onAuthRequired }: { onAuthRequired: () => void }) => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const { lang, setLang } = useI18n();
   const [wishlist, setWishlist] = useState<{ app_id: string; apps: DBApp }[]>([]);
   const [installedApps, setInstalledApps] = useState<InstalledApp[]>([]);
   const [activeTab, setActiveTab] = useState<'library' | 'wishlist' | 'notifications'>('library');
@@ -450,6 +452,23 @@ const UserProfile = ({ onAuthRequired }: { onAuthRequired: () => void }) => {
             )}
           </div>
         )}
+      </div>
+
+        {/* Settings */}
+      <div className="px-4 mt-6">
+        <h3 className="font-semibold text-sm text-muted-foreground mb-2 px-1">Language</h3>
+        <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border/50 mb-4">
+          {([['en', '🇬🇧 English'], ['sw', '🇰🇪 Kiswahili']] as [Lang, string][]).map(([code, label]) => (
+            <button key={code} onClick={() => setLang(code)}
+              className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-accent/30 transition-colors">
+              <div className="flex items-center gap-3">
+                <Globe size={18} className="text-muted-foreground" />
+                <span className="text-sm font-medium text-foreground">{label}</span>
+              </div>
+              {lang === code && <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center"><Check size={11} className="text-white" /></div>}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Settings */}

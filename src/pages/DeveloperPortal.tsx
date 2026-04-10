@@ -80,7 +80,7 @@ const ApkUploadSlot = ({ fileName, onFile }: ApkUploadSlotProps) => {
       ) : (
         <>
           <p className="text-sm font-semibold text-foreground">Upload APK File</p>
-          <p className="text-xs text-muted-foreground text-center">Tap to select your Android APK file (.apk)</p>
+          <p className="text-xs text-muted-foreground text-center">Tap to select your Android APK file (.apk) · Max 150 MB</p>
         </>
       )}
       <input ref={ref} type="file" accept=".apk,application/vnd.android.package-archive,application/octet-stream" className="hidden"

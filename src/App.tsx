@@ -9,11 +9,13 @@ import DeveloperProfilePage from "./pages/DeveloperProfilePage";
 import LiveSearchPage from "./pages/LiveSearchPage";
 import NotFound from "./pages/NotFound";
 import { AuthProvider } from "./hooks/useAuth";
+import { I18nProvider } from "./lib/i18n";
 
 const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
+    <I18nProvider>
     <AuthProvider>
       <TooltipProvider>
         <Toaster />
@@ -30,6 +32,7 @@ const App = () => (
         </BrowserRouter>
       </TooltipProvider>
     </AuthProvider>
+    </I18nProvider>
   </QueryClientProvider>
 );
 
