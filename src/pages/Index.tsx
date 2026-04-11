@@ -10,6 +10,8 @@ import AdminPanel from './AdminPanel';
 import TopChartsPage from './TopChartsPage';
 import CategoriesPage from './CategoriesPage';
 import CommunityPage from './CommunityPage';
+import LeaderboardPage from './LeaderboardPage';
+import CollectionsPage from './CollectionsPage';
 import { useAuth } from '@/hooks/useAuth';
 
 const Index = () => {
@@ -33,6 +35,10 @@ const Index = () => {
         return <CategoriesPage onAuthRequired={handleAuthRequired} />;
       case 'community':
         return <CommunityPage onAuthRequired={handleAuthRequired} />;
+      case 'leaderboard':
+        return <LeaderboardPage onBack={() => setActiveTab('apps')} />;
+      case 'collections':
+        return <CollectionsPage onBack={() => setActiveTab('apps')} />;
       case 'search':
         return <LiveSearchPage onAuthRequired={handleAuthRequired} />;
       case 'admin':

@@ -147,6 +147,21 @@ const LiveAppsPage = ({ onAuthRequired, onTabChange }: LiveAppsPageProps) => {
           onMore={() => onTabChange?.('topcharts')}
         />
 
+        {/* Quick Nav Chips */}
+        <div className="flex gap-2 px-4 mb-4 overflow-x-auto scrollbar-hide">
+          {[
+            { label: '🏆 Leaderboard', tab: 'leaderboard' },
+            { label: '📚 Collections', tab: 'collections' },
+            { label: '💬 Community', tab: 'community' },
+            { label: '📊 Top Charts', tab: 'topcharts' },
+          ].map(({ label, tab }) => (
+            <button key={tab} onClick={() => onTabChange?.(tab)}
+              className="flex-shrink-0 px-3 py-1.5 rounded-full border border-border text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground transition-colors bg-white">
+              {label}
+            </button>
+          ))}
+        </div>
+
         {/* ⭐ Top Rated */}
         {(topRatedApps.length > 0 || topRatedLoading) && (
           <HorizontalSection

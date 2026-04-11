@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Plus, Package, TrendingUp, Star, Trash2, X, ChevronDown, Image, Upload, Edit2, ArrowUpCircle, BarChart2, Sparkles, Loader2, Globe, Building2, User, Save, FileText, Smartphone } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
-import { fetchDeveloperApps, submitApp, deleteApp, uploadAppMedia, updateApp } from '@/lib/api';
+import { fetchDeveloperApps, submitApp, deleteApp, uploadAppMedia, updateApp, uploadFileViaXHR } from '@/lib/api';
 import { generateAppDescription } from '@/lib/featuredApi';
 import { DBApp } from '@/types/database';
 import AppIcon from '@/components/features/AppIcon';
@@ -195,6 +195,7 @@ const AppForm = ({ developerId, developerName, onClose, onDone, editApp }: AppFo
   const [apkFile, setApkFile] = useState<File | null>(null);
   const [existingApkUrl] = useState<string | null>(editApp?.apk_url || null);
   const [loading, setLoading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [generatingDesc, setGeneratingDesc] = useState(false);
 
   const set = (k: string, v: string | number) => setForm(f => ({ ...f, [k]: v }));
@@ -248,17 +249,19 @@ const AppForm = ({ developerId, developerName, onClose, onDone, editApp }: AppFo
         }
       }
 
-      // Upload APK
+      // Upload APK via XHR (no timeout, progress tracking, handles 150MB+)
       let apkUrl: string | undefined = existingApkUrl || undefined;
       if (apkFile) {
         const ext = apkFile.name.split('.').pop() || 'apk';
         const path = `${developerId}/${targetId}/app.${ext}`;
-        const { error: apkError } = await supabase.storage
-          .from('app-media')
-          .upload(path, apkFile, { upsert: true, contentType: 'application/octet-stream' });
-        if (apkError) throw apkError;
-        const { data } = supabase.storage.from('app-media').getPublicUrl(path);
-        apkUrl = data.publicUrl;
+        setUploadProgress(1); // show progress bar
+        apkUrl = await uploadFileViaXHR(
+          apkFile,
+          path,
+          'application/octet-stream',
+          (pct) => setUploadProgress(pct)
+        );
+        setUploadProgress(0);
         // Auto-fill size from file
         const sizeMB = (apkFile.size / (1024 * 1024)).toFixed(1);
         form.size = `${sizeMB} MB`;
@@ -494,8 +497,13 @@ const AppForm = ({ developerId, developerName, onClose, onDone, editApp }: AppFo
           </div>
           <button onClick={handleSubmit} disabled={loading}
             className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:bg-primary/90 disabled:opacity-60">
-            {loading ? (isEdit ? 'Saving...' : 'Uploading & Submitting...') : isEdit ? 'Save Changes' : 'Submit for Review'}
+            {loading ? (uploadProgress > 0 ? `Uploading APK... ${uploadProgress}%` : isEdit ? 'Saving...' : 'Submitting...') : isEdit ? 'Save Changes' : 'Submit for Review'}
           </button>
+          {uploadProgress > 0 && (
+            <div className="w-full bg-secondary rounded-full h-2 overflow-hidden">
+              <div className="h-2 bg-emerald-500 rounded-full transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
+            </div>
+          )}
           {!isEdit && (
             <p className="text-xs text-muted-foreground text-center">Your app will be published immediately and visible to all users</p>
           )}

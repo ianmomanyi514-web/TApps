@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Bookmark, Download, Settings, LogOut, User, Code2, Star, ChevronRight, ExternalLink, Clock, ArrowUpCircle, Share2, Check, X, Bell, BellOff, Globe } from 'lucide-react';
+import { Bookmark, Download, Settings, LogOut, User, Code2, Star, ChevronRight, ExternalLink, Clock, ArrowUpCircle, Share2, Check, X, Bell, BellOff, Globe, Activity, Package, MessageSquare, Heart } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { fetchUserWishlist, removeFromWishlist } from '@/lib/api';
 import { DBApp } from '@/types/database';
@@ -53,12 +53,13 @@ const UserProfile = ({ onAuthRequired }: { onAuthRequired: () => void }) => {
   const { lang, setLang } = useI18n();
   const [wishlist, setWishlist] = useState<{ app_id: string; apps: DBApp }[]>([]);
   const [installedApps, setInstalledApps] = useState<InstalledApp[]>([]);
-  const [activeTab, setActiveTab] = useState<'library' | 'wishlist' | 'notifications'>('library');
+  const [activeTab, setActiveTab] = useState<'library' | 'wishlist' | 'notifications' | 'activity'>('library');
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const [changelogModal, setChangelogModal] = useState<ChangelogInfo | null>(null);
   const [notifPrefs, setNotifPrefs] = useState<NotifPrefs>(DEFAULT_PREFS);
   const [savingPrefs, setSavingPrefs] = useState(false);
+  const [activity, setActivity] = useState<{id:string;type:string;created_at:string;app_id:string|null;apps?:{name:string;icon:string;icon_bg:string}|null;meta?:Record<string,unknown>|null}[]>([]);
 
   useEffect(() => {
     if (!user) return;
@@ -91,6 +92,9 @@ const UserProfile = ({ onAuthRequired }: { onAuthRequired: () => void }) => {
           setNotifPrefs({ ...DEFAULT_PREFS, ...(data.notification_preferences as NotifPrefs) });
         }
       }),
+      // Load activity
+      supabase.from('user_activity').select('*, apps(name, icon, icon_bg)').eq('user_id', user.id).order('created_at', { ascending: false }).limit(30)
+        .then(({ data }) => setActivity((data || []) as typeof activity)),
     ]).catch(() => {}).finally(() => setLoading(false));
   }, [user?.id]);
 
@@ -267,9 +271,10 @@ const UserProfile = ({ onAuthRequired }: { onAuthRequired: () => void }) => {
         {([
           ['library', 'Library', Download],
           ['wishlist', 'Wishlist', Bookmark],
+          ['activity', 'Activity', Activity],
           ['notifications', 'Alerts', Bell],
         ] as const).map(([id, label, Icon]) => (
-          <button key={id} onClick={() => setActiveTab(id as 'library' | 'wishlist' | 'notifications')}
+          <button key={id} onClick={() => setActiveTab(id as 'library' | 'wishlist' | 'notifications' | 'activity')}
             className={cn('flex-1 flex items-center justify-center gap-1.5 py-3.5 text-xs font-semibold border-b-2 transition-colors',
               activeTab === id ? 'border-primary text-primary' : 'border-transparent text-muted-foreground')}>
             <Icon size={14} />{label}
@@ -385,6 +390,51 @@ const UserProfile = ({ onAuthRequired }: { onAuthRequired: () => void }) => {
               ))}
             </div>
           )
+        ) : activeTab === 'activity' ? (
+          /* ── Activity Tab ── */
+          <div className="space-y-2">
+            <p className="font-bold text-base text-foreground mb-3">Your Activity</p>
+            {activity.length === 0 ? (
+              <div className="text-center py-16">
+                <Activity size={44} className="text-muted-foreground/20 mx-auto mb-4" />
+                <p className="font-bold text-foreground mb-1">No activity yet</p>
+                <p className="text-sm text-muted-foreground">Your actions will appear here</p>
+              </div>
+            ) : (
+              activity.map(item => {
+                const icons: Record<string, { icon: React.ReactNode; label: string; color: string }> = {
+                  install:       { icon: <Download size={14} />,        label: 'Installed',       color: 'bg-emerald-100 text-emerald-600' },
+                  review:        { icon: <Star size={14} />,            label: 'Reviewed',        color: 'bg-yellow-100 text-yellow-600' },
+                  wishlist:      { icon: <Bookmark size={14} />,        label: 'Wishlisted',      color: 'bg-blue-100 text-blue-600' },
+                  community_post:{ icon: <MessageSquare size={14} />,   label: 'Posted',          color: 'bg-purple-100 text-purple-600' },
+                  community_like:{ icon: <Heart size={14} />,           label: 'Liked post',      color: 'bg-red-100 text-red-500' },
+                };
+                const cfg = icons[item.type] || { icon: <Activity size={14} />, label: item.type, color: 'bg-secondary text-muted-foreground' };
+                return (
+                  <div key={item.id} className="flex items-center gap-3 p-3 bg-card border border-border rounded-2xl">
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${cfg.color}`}>
+                      {cfg.icon}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-foreground">{cfg.label}</span>
+                        {item.apps && <span className="text-xs text-muted-foreground truncate">{item.apps.name}</span>}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        {new Date(item.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                    {item.apps && (
+                      <button onClick={() => navigate(`/app/${item.app_id}`)}
+                        className="p-2 rounded-xl hover:bg-accent transition-colors">
+                        <ExternalLink size={13} className="text-muted-foreground" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
         ) : (
           /* ── Notification Preferences Tab ── */
           <div className="space-y-4">

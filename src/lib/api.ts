@@ -86,7 +86,6 @@ export async function submitApp(appData: {
   thumbnail?: string;
   screenshots_urls?: string[];
 }) {
-  // Auto-publish: apps go live immediately without admin approval
   const { data, error } = await supabase.from('apps').insert({ ...appData, status: 'approved' }).select().single();
   if (error) throw error;
   return data as DBApp;
@@ -119,16 +118,61 @@ export async function deleteApp(appId: string) {
   if (error) throw error;
 }
 
-// ========== MEDIA UPLOAD ==========
+// ========== MEDIA UPLOAD (XHR-based for large files) ==========
 export async function uploadAppMedia(file: File, userId: string, appId: string, slot: string): Promise<string> {
   const ext = file.name.split('.').pop();
   const path = `${userId}/${appId}/${slot}.${ext}`;
-  const { error } = await supabase.storage
-    .from('app-media')
-    .upload(path, file, { upsert: true, contentType: file.type });
-  if (error) throw error;
-  const { data } = supabase.storage.from('app-media').getPublicUrl(path);
-  return data.publicUrl;
+  return uploadFileViaXHR(file, path, file.type || 'application/octet-stream');
+}
+
+/**
+ * Upload a file directly to Supabase Storage via XHR.
+ * XHR has no fetch timeout, supports progress, and handles large files reliably.
+ */
+export function uploadFileViaXHR(
+  file: File,
+  storagePath: string,
+  contentType: string,
+  onProgress?: (pct: number) => void
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+    const url = `${supabaseUrl}/storage/v1/object/app-media/${storagePath}`;
+
+    // Try to get user session token for auth
+    supabase.auth.getSession().then(({ data }) => {
+      const token = data.session?.access_token || anonKey;
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', url);
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.setRequestHeader('Content-Type', contentType);
+      xhr.setRequestHeader('x-upsert', 'true');
+      xhr.timeout = 0; // No timeout — critical for large files
+
+      if (onProgress && xhr.upload) {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+        };
+      }
+
+      xhr.onload = () => {
+        if (xhr.status === 200 || xhr.status === 201) {
+          const publicUrl = `${supabaseUrl}/storage/v1/object/public/app-media/${storagePath}`;
+          onProgress?.(100);
+          resolve(publicUrl);
+        } else {
+          reject(new Error(`Upload failed (${xhr.status}): ${xhr.responseText}`));
+        }
+      };
+
+      xhr.onerror = () => reject(new Error('Network error during upload. Check your connection.'));
+      xhr.ontimeout = () => reject(new Error('Upload timed out.'));
+
+      xhr.send(file);
+    }).catch(reject);
+  });
 }
 
 // ========== REVIEWS ==========
@@ -150,7 +194,6 @@ export async function submitReview(review: { app_id: string; user_id: string; ra
     .single();
   if (error) throw error;
 
-  // Notify developer via email (non-blocking)
   try {
     const { data: appData } = await supabase
       .from('apps')
@@ -330,4 +373,65 @@ export async function getStoreStats() {
     totalReviews: reviewsRes.count ?? 0,
     totalInstalls: installsRes.count ?? 0,
   };
+}
+
+// ========== LEADERBOARD ==========
+export async function fetchDeveloperLeaderboard(limit = 20) {
+  const { data, error } = await supabase
+    .from('user_profiles')
+    .select('id, username, avatar_url, verified, bio, company')
+    .eq('role', 'developer')
+    .limit(100);
+  if (error) throw error;
+
+  // For each developer, get their app stats
+  const developers = data || [];
+  const withStats = await Promise.all(
+    developers.map(async (dev) => {
+      const { data: apps } = await supabase
+        .from('apps_with_stats')
+        .select('downloads_count, avg_rating, review_count')
+        .eq('developer_id', dev.id)
+        .eq('status', 'approved');
+      const appList = apps || [];
+      const totalDownloads = appList.reduce((s, a) => s + (a.downloads_count || 0), 0);
+      const avgRating = appList.length
+        ? appList.reduce((s, a) => s + Number(a.avg_rating || 0), 0) / appList.length
+        : 0;
+      const totalReviews = appList.reduce((s, a) => s + (a.review_count || 0), 0);
+      return {
+        ...dev,
+        app_count: appList.length,
+        total_downloads: totalDownloads,
+        avg_rating: avgRating,
+        total_reviews: totalReviews,
+        score: totalDownloads * 1 + avgRating * 100 + totalReviews * 5,
+      };
+    })
+  );
+
+  return withStats
+    .filter((d) => d.app_count > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
+// ========== COLLECTIONS ==========
+export async function fetchCollections() {
+  const { data, error } = await supabase
+    .from('collections')
+    .select('*')
+    .order('position', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function fetchCollectionApps(collectionId: string): Promise<DBApp[]> {
+  const { data, error } = await supabase
+    .from('collection_apps')
+    .select('position, apps:app_id(*)')
+    .eq('collection_id', collectionId)
+    .order('position', { ascending: true });
+  if (error) throw error;
+  return ((data || []).map((r: Record<string, unknown>) => r.apps) as DBApp[]).filter(Boolean);
 }
